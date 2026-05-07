@@ -1,17 +1,32 @@
 import { NextResponse } from "next/server";
 import { getGemini, splitDataUrl, IMAGE_MODEL } from "@/lib/gemini";
-import type { GenerateRequest, GenerateResponse } from "@/lib/types";
+import type { AspectRatio, GenerateRequest, GenerateResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+function aspectInstruction(ratio?: AspectRatio): string {
+  switch (ratio) {
+    case "1:1":
+      return " IMPORTANT: render as a SQUARE 1:1 image suitable for an Instagram feed post. Compose for a square frame.";
+    case "9:16":
+      return " IMPORTANT: render as a TALL VERTICAL 9:16 image suitable for an Instagram Story or Reel. Compose for a tall vertical frame.";
+    case "4:5":
+      return " IMPORTANT: render as a 4:5 PORTRAIT image suitable for an Instagram feed post or Reel cover. Compose for a portrait frame.";
+    default:
+      return "";
+  }
+}
+
 async function generateOne(
   baseImage: string,
-  prompt: string
+  prompt: string,
+  aspectRatio?: AspectRatio
 ): Promise<{ image: string | null; error: string | null }> {
   try {
     const ai = getGemini();
     const { mimeType, data } = splitDataUrl(baseImage);
+    const finalPrompt = prompt + aspectInstruction(aspectRatio);
     const result = await ai.models.generateContent({
       model: IMAGE_MODEL,
       contents: [
@@ -19,7 +34,7 @@ async function generateOne(
           role: "user",
           parts: [
             { inlineData: { mimeType, data } },
-            { text: prompt },
+            { text: finalPrompt },
           ],
         },
       ],
@@ -50,11 +65,12 @@ export async function POST(req: Request) {
     if (!Array.isArray(body.prompts) || body.prompts.length === 0) {
       return NextResponse.json({ error: "Missing prompts" }, { status: 400 });
     }
-    const prompts = body.prompts.slice(0, 4);
-    while (prompts.length < 4) prompts.push(prompts[prompts.length - 1]);
+    const N = Math.min(body.prompts.length, 4);
+    const prompts = body.prompts.slice(0, N);
+    const ratios = (body.aspectRatios ?? []).slice(0, N);
 
     const results = await Promise.all(
-      prompts.map((p) => generateOne(body.baseImage, p))
+      prompts.map((p, i) => generateOne(body.baseImage, p, ratios[i]))
     );
 
     const response: GenerateResponse = {

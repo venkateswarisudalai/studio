@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Sparkles,
   Upload,
@@ -14,6 +15,10 @@ import {
   AlertTriangle,
   Download,
   ArrowLeft,
+  Square,
+  RectangleVertical,
+  Rows3,
+  Type as TypeIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -24,13 +29,38 @@ import {
   putVersion,
 } from "@/lib/db";
 import { downscaleDataUrl, fileToDataUrl, uid } from "@/lib/utils";
-import type {
-  AnalyzeResponse,
-  GenerateResponse,
-  Session,
-  Variant,
-  VersionNode,
+import {
+  IG_SIZES,
+  type AnalyzeResponse,
+  type AspectRatio,
+  type GenerateResponse,
+  type Session,
+  type Variant,
+  type VersionNode,
 } from "@/lib/types";
+
+const Composer = dynamic(() => import("./Composer"), { ssr: false });
+
+type AspectMode = AspectRatio | "all-ig";
+
+const ASPECT_CHIPS: { id: AspectMode; label: string; icon: React.ReactNode }[] = [
+  { id: "1:1", label: "1:1", icon: <Square size={12} /> },
+  { id: "4:5", label: "4:5", icon: <RectangleVertical size={12} /> },
+  { id: "9:16", label: "9:16", icon: <RectangleVertical size={12} /> },
+  { id: "all-ig", label: "All IG", icon: <Rows3 size={12} /> },
+];
+
+function aspectToWH(ratio?: AspectRatio): { w: number; h: number } {
+  switch (ratio) {
+    case "9:16":
+      return { w: 9, h: 16 };
+    case "4:5":
+      return { w: 4, h: 5 };
+    case "1:1":
+    default:
+      return { w: 1, h: 1 };
+  }
+}
 
 const EXAMPLES = [
   {
@@ -72,6 +102,11 @@ export default function Studio() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState<Loading>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
+  const [aspectMode, setAspectMode] = useState<AspectMode>("1:1");
+  const [composeFor, setComposeFor] = useState<{
+    image: string;
+    headline: string;
+  } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -196,9 +231,16 @@ export default function Studio() {
       previousVersions: VersionNode[];
       userPrompt: string;
       parentId: string | null;
+      aspectMode: AspectMode;
     }) => {
-      const { sessionToUse, baseImage, previousVersions, userPrompt, parentId } =
-        opts;
+      const {
+        sessionToUse,
+        baseImage,
+        previousVersions,
+        userPrompt,
+        parentId,
+        aspectMode,
+      } = opts;
       setError(null);
       setLoading({ kind: "analyzing" });
 
@@ -230,6 +272,14 @@ export default function Studio() {
         const conditioning =
           analyze.mode === "generate" ? sessionToUse.productImage : baseImage;
 
+        const isIgSizes = aspectMode === "all-ig";
+        const ratiosToRun: AspectRatio[] = isIgSizes
+          ? IG_SIZES
+          : [aspectMode, aspectMode, aspectMode, aspectMode];
+        const promptsToRun = isIgSizes
+          ? [analyze.variants[0], analyze.variants[0], analyze.variants[0]]
+          : analyze.variants;
+
         const versionId = uid();
         const placeholder: VersionNode = {
           id: versionId,
@@ -237,8 +287,10 @@ export default function Studio() {
           userPrompt,
           label: analyze.label,
           mode: analyze.mode,
+          kind: isIgSizes ? "ig-sizes" : "single",
           variants: [],
           selectedVariantId: null,
+          headlines: analyze.headlines,
           createdAt: Date.now(),
         };
 
@@ -252,7 +304,8 @@ export default function Studio() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             baseImage: conditioning,
-            prompts: analyze.variants,
+            prompts: promptsToRun,
+            aspectRatios: ratiosToRun,
             mode: analyze.mode,
           }),
         });
@@ -268,7 +321,8 @@ export default function Studio() {
               ? ({
                   id: uid(),
                   image: img,
-                  prompt: analyze.variants[i] ?? userPrompt,
+                  prompt: promptsToRun[i] ?? userPrompt,
+                  aspectRatio: ratiosToRun[i],
                   createdAt: Date.now(),
                 } as Variant)
               : null
@@ -276,7 +330,7 @@ export default function Studio() {
           .filter((v): v is Variant => v !== null);
 
         if (!variants.length) {
-          // Surface first error if all 4 failed
+          // Surface first error if all generations failed
           const firstErr = gen.errors.find((e) => e) ?? "All generations failed";
           throw new Error(firstErr);
         }
@@ -331,8 +385,9 @@ export default function Studio() {
       previousVersions: [],
       userPrompt: prompt.trim(),
       parentId: null,
+      aspectMode,
     });
-  }, [generateTurn, pendingImage, pendingTitle, prompt]);
+  }, [aspectMode, generateTurn, pendingImage, pendingTitle, prompt]);
 
   const handleSubmitFollowup = useCallback(async () => {
     if (!session || !activeBaseImage || !prompt.trim()) return;
@@ -342,8 +397,17 @@ export default function Studio() {
       previousVersions: versions,
       userPrompt: prompt.trim(),
       parentId: activeVersionId,
+      aspectMode,
     });
-  }, [activeBaseImage, activeVersionId, generateTurn, prompt, session, versions]);
+  }, [
+    activeBaseImage,
+    activeVersionId,
+    aspectMode,
+    generateTurn,
+    prompt,
+    session,
+    versions,
+  ]);
 
   const onSubmit = () => {
     if (!session) return handleSubmitInitial();
@@ -481,8 +545,14 @@ export default function Studio() {
         </header>
 
         {/* Canvas */}
-        <section className="relative flex-1 overflow-y-auto">
-          {!session && !pendingImage ? (
+        <section className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {composeFor ? (
+            <Composer
+              image={composeFor.image}
+              headline={composeFor.headline}
+              onClose={() => setComposeFor(null)}
+            />
+          ) : !session && !pendingImage ? (
             <EmptyState
               onUpload={() => fileInput.current?.click()}
               onExample={handleExample}
@@ -504,6 +574,9 @@ export default function Studio() {
               activeVersion={activeVersion}
               loading={loading}
               onSelectVariant={selectVariant}
+              onPickHeadline={(variant, headline) =>
+                setComposeFor({ image: variant.image, headline })
+              }
               error={error}
               onClearError={() => setError(null)}
             />
@@ -527,6 +600,8 @@ export default function Studio() {
           }
           showUpload={!session}
           onUpload={() => fileInput.current?.click()}
+          aspectMode={aspectMode}
+          setAspectMode={setAspectMode}
         />
 
         {error ? (
@@ -738,6 +813,7 @@ function CanvasView({
   activeVersion,
   loading,
   onSelectVariant,
+  onPickHeadline,
   error,
   onClearError,
 }: {
@@ -746,6 +822,7 @@ function CanvasView({
   activeVersion: VersionNode | null;
   loading: Loading;
   onSelectVariant: (versionId: string, variantId: string) => void;
+  onPickHeadline: (variant: Variant, headline: string) => void;
   error: string | null;
   onClearError: () => void;
 }) {
@@ -796,56 +873,31 @@ function CanvasView({
         <ZoomControl zoom={zoom} setZoom={setZoom} />
       </div>
 
-      <div
-        className="mx-auto grid grid-cols-2 gap-3"
-        style={{ width: `min(100%, ${zoom}vh)` }}
-      >
-        {[0, 1, 2, 3].map((i) => {
-          const v = activeVersion.variants[i];
-          const selected = v && v.id === activeVersion.selectedVariantId;
-          if (!v) {
-            return (
-              <div
-                key={i}
-                className="aspect-square overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-elev)]"
-              >
-                <div className="shimmer h-full w-full" />
-              </div>
-            );
-          }
-          return (
-            <button
-              key={v.id}
-              onClick={() => onSelectVariant(activeVersion.id, v.id)}
-              className={clsx(
-                "group relative aspect-square overflow-hidden rounded-xl border bg-[var(--bg-elev)] transition",
-                selected
-                  ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/40"
-                  : "border-[var(--border)] hover:border-white/30"
-              )}
-            >
-              <img
-                src={v.image}
-                alt={`Variant ${i + 1}`}
-                className="h-full w-full object-cover transition group-hover:scale-[1.02]"
-              />
-              <div className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] backdrop-blur">
-                {i + 1}
-              </div>
-              {selected && (
-                <div className="absolute right-1.5 top-1.5 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium text-black">
-                  Base
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      <VariantGrid
+        version={activeVersion}
+        zoom={zoom}
+        onSelect={(vid) => onSelectVariant(activeVersion.id, vid)}
+      />
+
+      {activeVersion.headlines && activeVersion.headlines.length > 0 ? (
+        <HeadlineSuggestions
+          headlines={activeVersion.headlines}
+          onPick={(h) => {
+            const sel =
+              activeVersion.variants.find(
+                (v) => v.id === activeVersion.selectedVariantId
+              ) ?? activeVersion.variants[0];
+            if (sel) onPickHeadline(sel, h);
+          }}
+        />
+      ) : null}
 
       {isGeneratingThisVersion && (
         <div className="mt-3 flex items-center justify-center gap-2 text-xs text-[var(--muted)]">
           <Loader2 size={14} className="animate-spin" />
-          Crafting four directions…
+          Crafting{" "}
+          {activeVersion.kind === "ig-sizes" ? "three IG sizes" : "four directions"}
+          …
         </div>
       )}
 
@@ -867,6 +919,132 @@ function CanvasView({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function VariantGrid({
+  version,
+  zoom,
+  onSelect,
+}: {
+  version: VersionNode;
+  zoom: number;
+  onSelect: (variantId: string) => void;
+}) {
+  const isIgSizes = version.kind === "ig-sizes";
+  const expectedRatios: AspectRatio[] = isIgSizes
+    ? IG_SIZES
+    : version.variants[0]?.aspectRatio
+      ? Array(4).fill(version.variants[0].aspectRatio)
+      : Array(4).fill("1:1");
+  const expected = isIgSizes ? 3 : 4;
+
+  // Each tile uses inline style for aspect-ratio so we don't depend on
+  // Tailwind safelisting dynamic `aspect-[w/h]` classes.
+  const renderTile = (i: number) => {
+    const v = version.variants[i];
+    const ratio = v?.aspectRatio ?? expectedRatios[i] ?? "1:1";
+    const wh = aspectToWH(ratio);
+    const aspectStyle: React.CSSProperties = {
+      aspectRatio: `${wh.w} / ${wh.h}`,
+      height: "100%",
+    };
+    if (!v) {
+      return (
+        <div
+          key={i}
+          style={aspectStyle}
+          className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-elev)]"
+        >
+          <div className="shimmer h-full w-full" />
+        </div>
+      );
+    }
+    const selected = v.id === version.selectedVariantId;
+    return (
+      <button
+        key={v.id}
+        onClick={() => onSelect(v.id)}
+        style={aspectStyle}
+        className={clsx(
+          "group relative overflow-hidden rounded-xl border bg-[var(--bg-elev)] transition",
+          selected
+            ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/40"
+            : "border-[var(--border)] hover:border-white/30"
+        )}
+      >
+        <img
+          src={v.image}
+          alt={`Variant ${i + 1}`}
+          className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+        />
+        <div className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] backdrop-blur">
+          {ratio}
+        </div>
+        {selected && (
+          <div className="absolute right-1.5 top-1.5 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium text-black">
+            Base
+          </div>
+        )}
+      </button>
+    );
+  };
+
+  if (isIgSizes) {
+    return (
+      <div
+        className="mx-auto flex items-center justify-center gap-3"
+        style={{ height: `${zoom}vh` }}
+      >
+        {Array.from({ length: expected }, (_, i) => renderTile(i))}
+      </div>
+    );
+  }
+
+  // 2x2: two rows, each row = half the total height
+  return (
+    <div
+      className="mx-auto flex flex-col items-center justify-center gap-3"
+      style={{ height: `${zoom}vh` }}
+    >
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-3">
+        {renderTile(0)}
+        {renderTile(1)}
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-3">
+        {renderTile(2)}
+        {renderTile(3)}
+      </div>
+    </div>
+  );
+}
+
+function HeadlineSuggestions({
+  headlines,
+  onPick,
+}: {
+  headlines: string[];
+  onPick: (h: string) => void;
+}) {
+  return (
+    <div className="mx-auto mt-4 max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--bg-elev)] p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs text-[var(--muted)]">
+        <Sparkles size={12} className="text-[var(--accent)]" />
+        Suggested ad headlines — click to add as editable text on the canvas
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {headlines.map((h) => (
+          <button
+            key={h}
+            onClick={() => onPick(h)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-elev-2)] px-2.5 py-1.5 text-xs hover:border-white/30"
+          >
+            <TypeIcon size={12} className="text-[var(--muted)]" />
+            {h}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -953,6 +1131,8 @@ function PromptBar({
   placeholder,
   showUpload,
   onUpload,
+  aspectMode,
+  setAspectMode,
 }: {
   prompt: string;
   setPrompt: (s: string) => void;
@@ -963,9 +1143,44 @@ function PromptBar({
   placeholder: string;
   showUpload: boolean;
   onUpload: () => void;
+  aspectMode: AspectMode;
+  setAspectMode: (m: AspectMode) => void;
 }) {
   return (
-    <div className="border-t border-[var(--border)] bg-[var(--bg-elev)]/80 p-4 backdrop-blur">
+    <div className="border-t border-[var(--border)] bg-[var(--bg-elev)]/80 px-4 pb-3 pt-2 backdrop-blur">
+      <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-1.5 text-[11px]">
+        <span className="mr-1 text-[var(--muted)]">Size:</span>
+        {ASPECT_CHIPS.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => setAspectMode(c.id)}
+            className={clsx(
+              "inline-flex items-center gap-1 rounded-md border px-2 py-1 transition",
+              aspectMode === c.id
+                ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]"
+                : "border-[var(--border)] bg-[var(--bg-elev-2)] text-[var(--muted)] hover:text-white"
+            )}
+            title={
+              c.id === "1:1"
+                ? "Square — feed post"
+                : c.id === "4:5"
+                  ? "Portrait — feed / Reel cover"
+                  : c.id === "9:16"
+                    ? "Tall — Story / Reel"
+                    : "Generate all 3 Instagram sizes at once"
+            }
+          >
+            {c.icon}
+            {c.label}
+          </button>
+        ))}
+        <span className="ml-auto text-[var(--muted)]">
+          {aspectMode === "all-ig"
+            ? "Generates 1 direction at 3 IG sizes side-by-side"
+            : "Generates 4 variants at this size"}
+        </span>
+      </div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
