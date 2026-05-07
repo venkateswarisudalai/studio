@@ -6,6 +6,7 @@ import {
   Upload,
   Send,
   Plus,
+  Minus,
   ImageIcon,
   Loader2,
   X,
@@ -709,7 +710,7 @@ function PendingPreview({
           <img
             src={image}
             alt={title}
-            className="max-h-[60vh] w-full object-contain"
+            className="max-h-[45vh] w-full object-contain"
           />
         </div>
         <div className="mt-4 flex items-center justify-between gap-3">
@@ -748,6 +749,7 @@ function CanvasView({
   error: string | null;
   onClearError: () => void;
 }) {
+  const [zoom, setZoom] = useState(50); // grid container width in vh; default 50vh ⇒ ~½ screen
   const isGeneratingThisVersion =
     activeVersion &&
     loading.kind === "generating" &&
@@ -758,7 +760,7 @@ function CanvasView({
 
   if (!activeVersion) {
     if (isAnalyzing) {
-      return <AnalyzingState />;
+      return <AnalyzingState zoom={zoom} />;
     }
     return (
       <div className="flex h-full items-center justify-center p-8 text-[var(--muted)]">
@@ -768,9 +770,9 @@ function CanvasView({
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
+    <div className="mx-auto max-w-5xl px-6 py-4">
+      <div className="mb-3 flex items-end justify-between gap-4">
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
             <span
               className={clsx(
@@ -784,16 +786,20 @@ function CanvasView({
             </span>
             <span>{new Date(activeVersion.createdAt).toLocaleTimeString()}</span>
           </div>
-          <h2 className="mt-1 text-xl font-semibold tracking-tight">
+          <h2 className="mt-1 truncate text-lg font-semibold tracking-tight">
             {activeVersion.label}
           </h2>
-          <div className="mt-0.5 max-w-2xl truncate text-sm text-[var(--muted)]">
+          <div className="mt-0.5 max-w-2xl truncate text-xs text-[var(--muted)]">
             “{activeVersion.userPrompt}”
           </div>
         </div>
+        <ZoomControl zoom={zoom} setZoom={setZoom} />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div
+        className="mx-auto grid grid-cols-2 gap-3"
+        style={{ width: `min(100%, ${zoom}vh)` }}
+      >
         {[0, 1, 2, 3].map((i) => {
           const v = activeVersion.variants[i];
           const selected = v && v.id === activeVersion.selectedVariantId;
@@ -801,7 +807,7 @@ function CanvasView({
             return (
               <div
                 key={i}
-                className="aspect-square overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-elev)]"
+                className="aspect-square overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-elev)]"
               >
                 <div className="shimmer h-full w-full" />
               </div>
@@ -812,7 +818,7 @@ function CanvasView({
               key={v.id}
               onClick={() => onSelectVariant(activeVersion.id, v.id)}
               className={clsx(
-                "group relative aspect-square overflow-hidden rounded-2xl border bg-[var(--bg-elev)] transition",
+                "group relative aspect-square overflow-hidden rounded-xl border bg-[var(--bg-elev)] transition",
                 selected
                   ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/40"
                   : "border-[var(--border)] hover:border-white/30"
@@ -823,11 +829,11 @@ function CanvasView({
                 alt={`Variant ${i + 1}`}
                 className="h-full w-full object-cover transition group-hover:scale-[1.02]"
               />
-              <div className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] backdrop-blur">
+              <div className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] backdrop-blur">
                 {i + 1}
               </div>
               {selected && (
-                <div className="absolute right-2 top-2 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-[11px] font-medium text-black">
+                <div className="absolute right-1.5 top-1.5 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-medium text-black">
                   Base
                 </div>
               )}
@@ -837,7 +843,7 @@ function CanvasView({
       </div>
 
       {isGeneratingThisVersion && (
-        <div className="mt-4 flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
+        <div className="mt-3 flex items-center justify-center gap-2 text-xs text-[var(--muted)]">
           <Loader2 size={14} className="animate-spin" />
           Crafting four directions…
         </div>
@@ -865,27 +871,74 @@ function CanvasView({
   );
 }
 
-function AnalyzingState() {
+function AnalyzingState({ zoom = 50 }: { zoom?: number }) {
   return (
-    <div className="mx-auto max-w-5xl px-6 py-6">
-      <div className="mb-4">
+    <div className="mx-auto max-w-5xl px-6 py-4">
+      <div className="mb-3">
         <div className="h-3 w-24 rounded bg-[var(--bg-elev-2)]" />
-        <div className="mt-2 h-6 w-64 rounded bg-[var(--bg-elev-2)]" />
+        <div className="mt-2 h-5 w-64 rounded bg-[var(--bg-elev-2)]" />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div
+        className="mx-auto grid grid-cols-2 gap-3"
+        style={{ width: `min(100%, ${zoom}vh)` }}
+      >
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
-            className="aspect-square overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-elev)]"
+            className="aspect-square overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-elev)]"
           >
             <div className="shimmer h-full w-full" />
           </div>
         ))}
       </div>
-      <div className="mt-4 flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
+      <div className="mt-3 flex items-center justify-center gap-2 text-xs text-[var(--muted)]">
         <Loader2 size={14} className="animate-spin" />
         Reading the brief…
       </div>
+    </div>
+  );
+}
+
+function ZoomControl({
+  zoom,
+  setZoom,
+}: {
+  zoom: number;
+  setZoom: (n: number) => void;
+}) {
+  const MIN = 30;
+  const MAX = 90;
+  return (
+    <div className="flex flex-shrink-0 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--bg-elev)] px-1.5 py-1">
+      <button
+        type="button"
+        onClick={() => setZoom(Math.max(MIN, zoom - 10))}
+        className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] hover:bg-[var(--bg-elev-2)] hover:text-white"
+        aria-label="Zoom out"
+      >
+        <Minus size={12} />
+      </button>
+      <input
+        type="range"
+        min={MIN}
+        max={MAX}
+        step={5}
+        value={zoom}
+        onChange={(e) => setZoom(Number(e.target.value))}
+        className="h-1 w-20 cursor-pointer accent-[var(--accent)]"
+        aria-label="Canvas zoom"
+      />
+      <button
+        type="button"
+        onClick={() => setZoom(Math.min(MAX, zoom + 10))}
+        className="grid h-6 w-6 place-items-center rounded text-[var(--muted)] hover:bg-[var(--bg-elev-2)] hover:text-white"
+        aria-label="Zoom in"
+      >
+        <Plus size={12} />
+      </button>
+      <span className="ml-1 w-9 text-right text-[10px] tabular-nums text-[var(--muted)]">
+        {Math.round((zoom / 50) * 100)}%
+      </span>
     </div>
   );
 }
