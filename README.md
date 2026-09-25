@@ -8,7 +8,7 @@ sidebar so you can branch and compare.
 
 Built with Next.js + TypeScript, deployed on Vercel.
 
-## How it works
+## How it works..
 
 - **`gemini-2.5-flash`** reads the image you uploaded (or your selected variant),
   detects the product, decides whether your prompt is an **edit** of the current
